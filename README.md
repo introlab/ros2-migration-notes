@@ -1,6 +1,8 @@
 # ros2-migration-notes
 ROS2 migration notes
 
+This assumes that you are migrating from ROS1 Noetic on Ubuntu 20.04 to ROS2 Humble (either on Ubuntu 22.04 or compiled from source on Ubuntu 20.04).
+
 ## Workspace
 
 ### Isolated build
@@ -62,3 +64,36 @@ Python nodes are relatively easy to migrate.
 
 ### More complex migrations in nodes
 1. If you were using `tf`, you will need to use `tf2` and ̀`tf2_ros`. You had a TransformListener. You will now also need a Buffer. Construct the buffer with the node's clock (`get_clock()`), and construct the listener with the buffer. The buffer will be used to get transforms instead of the listener.
+2. If you were using `tf.transformations` in Python, there is no equivalent in ROS2 as this module is deprecated. Instead, use the `transforms3d` Python package. The API is different, so be careful. For instance, in quaternions, `tf.transormations` placed `w` last, while `transforms3d` places it first. Here is [an example](https://github.com/introlab/opentera-webrtc-ros/blob/ros2/opentera_webrtc_ros/opentera_webrtc_ros/libmapimageconverter.py#L14-L24) of using it to get the same API as in ROS1.
+You can also use the `tf_transformations` ROS package (note the underscore), which wraps `transforms3d` with the same API as `tf.transformations` had in ROS1. There is an example [here](https://github.com/introlab/t-top/blob/ros2-migration/ros/t_top/t_top/movement_commands.py#L12).
+3. `Rate`s are harder to use. If you can, use a `Timer` instead. If you need a rate, there is an example [here](https://github.com/introlab/opentera-webrtc-ros/blob/ros2/map_image_generator/src/main.cpp#L47).
+4. In ROS2, service calls are asynchronous. You can register a callback that will be called with the response when it is received. If you used to block on a service call in a callback (topic or other service), this can deadlock in ROS2. Either use asynchronous and callbacks, or dive deep into ROS2's [callback groups](https://docs.ros.org/en/humble/How-To-Guides/Using-callback-groups.html). There is an example using asynchronous [in C++ here](https://github.com/introlab/opentera-webrtc-ros/blob/ros2/map_image_generator/src/MapLabelsConverter.cpp#L26-L53), and one using callback groups [in Python here](https://github.com/introlab/t-top/blob/ros2-migration/ros/t_top/t_top/movement_commands.py#L77-L78) and [in C++ here](https://github.com/introlab/t-top/blob/ros2-migration/ros/demos/smart_speaker/src/states/task/WeatherForecastState.cpp#L21).
+5. In Python, typing is much more strict than it was. For instance, you can't directly publish a `str` now: you need to wrap it in a `String` message (using `String(data="...")` is an easy fix). Same thing for numbers: integers will not convert to floating point types in ROS messages. If you are trying to set the `x` field of a Pose as `pose.x = 0`, you will get a runtime error. Use `pose.x = 0.0` or use `pose.x = float(integer_value)`.
+
+### Launch file migration
+This is relatively straightforward if you decide to stick to XML launch files, even though the documentation is not really good.
+This [ros2-launch migration guide](https://docs.ros.org/en/humble/How-To-Guides/Migrating-from-ROS1/Migrating-Launch-Files.html) is useful.
+You will need to use the `.launch.xml` suffix for your launch files.
+Also, `if` and `unless` are way more restricted and can only be placed on a handful of things now, check the migration guide.
+If you used to pass a launch parameter to change the `output=` of nodes, you can't anymore: it needs an hardcoded string that is either "log", "screen" or "both". A tip: use "log" (or nothing as "log" is the default), and pass the `-a` flag to the `ros2-launch` command when you need to debug: this will redirect everything to the console. You can also use the `OVERRIDE_LAUNCH_PROCESS_OUTPUT` environment variable (this is what `-a` does).
+In ROS1, `eval` tags were way easier to use than in ROS2. Now, you need a pair of quotes englobing the whole thing that you want to evaluate, which means that you'll need a bunch of escaping of strings. Also, you used to have access to substitutions using `arg('name')` inside the evaluated expression: you can't do that anymore, you need to use launch file substitutions, which are textual. This is painful, and it also means that using `eval` for doing an `OR` on two conditions, for instance, will have weird results, because it will operate on strings and not booleans. You can compare to the "true" or "false" strings explicitly, or you can use the new operators substitutions like shown [here](https://github.com/introlab/odas_ros/blob/ros2/odas_ros/launch/odas.launch.xml#L32) with `$(or ...)`.
+If you used `rosparam` tags to pass YAML structured parameters, this does not work anymore. Use `param`. You can use nested `param` tags to reproduce a nested/mapping structure.
+Also, if you need to pass an empty array to a parameter, you will suffer. Passing `"[]"` will be rejected as the type of the array cannot be deduced. For a string array, you can use `"['']"` and filter for empty strings in your code, if you don't need empty strings usually. For numeric arrays, use a special value that you will filter that is out of the range you use, or combine the array with a boolean that chooses wether the array should be ignored/considered empty or wether should be used.
+
+The most painful thing here is that `ros2-launch` is really really bad to help you spot errors: you will get random Python tracebacks coming from the `ros2-launch` code, without much information on what the error was, and no information at all about where in the launch file it originated from. Even when using the `--debug` flag, you will only get more Python tracebacks.
+A few tips:
+- Make sure that your `arg` and `let` tags in the outer scope have `default=`, not `value=`, and that the opposite is true for `arg` tags inside `include` tags.
+- Make sure that your substitutions use `var` and not `arg` as in ROS1. Same thing for `find-package-prefix` or `find-package-share` instead of `find`.
+- Make sure that you use `exec=` and not `name=` in `node` tags.
+- Make sure that the launch files you `include` have the right suffix (probably `.launch.xml` for your's, probably `.launch.py` for externals, but not `.launch`: this is probably a ROS1 artifact).
+
+## Other tips
+
+### Debugging nodes
+Using a visual debugger with ROS is hard to configure. If you can use GDB, you can use a command of this form to debug specific nodes:
+```bash
+ros2 launch -a my_package my_launch_file.launch.xml --launch-prefix-filter '.*executable_name.*' --launch-prefix 'gnome-terminal --wait -- gdb -ex run --args'
+```
+This will launch a new terminal window with GDB for every node that matches the filter regex. You will need to press "Enter" to start the node in every terminal, and you will need to kill the terminals manually at the end of your debug session.
+
+
