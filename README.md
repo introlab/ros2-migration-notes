@@ -2,6 +2,17 @@
 ROS2 migration notes
 
 This assumes that you are migrating from ROS1 Noetic on Ubuntu 20.04 to ROS2 Humble (either on Ubuntu 22.04 or compiled from source on Ubuntu 20.04).
+Using Foxy is not recommended: it is distributed in binary form on Ubuntu 20.04, but it is already past its end-of-support date.
+Also, Foxy and Humble have a few incompatibilities (for instance, names of created interfaces [msgs, srvs, actions] CMake targets and packages).
+Foxy was not as mature as Humble is, and some features were missing (for instance, declaring parameters without default values, but with a type).
+Use Humble.
+
+Also, this does not cover migration from using Gazebo Classic to the newer Ignition Gazebo.
+Humble still supports Gazebo Classic, but Jazzy (Ubuntu 24.04) does not.
+Migration will be needed when moving to Jazzy.
+
+## Building Humble on Ubuntu 20.04
+TODO
 
 ## Workspace
 
@@ -13,7 +24,7 @@ In ROS2, the packages are built in an isolated fashion. By first building the RO
 There is no devel space in ROS2: every file that is needed will need to be installed using a CMake install rule.
 The `--symlink-install` flag can be used to create symlinks instead of copies when installing, giving similar advantages to the devel space (no need to rebuild between each modification of a file if it is not part of a compiled executable, like Python files and launch files and config files).
 
-### Using `colcon`
+### Using `colcon`, the ROS2 build tool
 In ROS2, `colcon` is used to build the workspace. Like `catkin_make`, but not as `catkin build`, it will need to be invoked from the source of the workspace.
 If you invoke it from a nested directory, it will happily proceed to create `build`, `install` and `log` directories at this nested place and will report a success, but it will not have done what you wanted it to do.
 Also, much like `catkin_make` and not as `catkin build`, it can't be preconfigured with a set of default arguments.
@@ -28,6 +39,11 @@ There is a `colcon clean` verb that can be used in two ways:
 1. `colcon clean workspace` will completely remove the `build`, `install` and `log` folders in the workspace, and all their content.
 2. `colcon clean packages` will remove only the selected packages from these folders. You can use standard `colcon` package selection arguments, like `--packages-select`, for the selection.
 
+#### `colcon` idiosyncrasies
+The equivalent of `--verbose` in `colcon` is `--event-handlers console_cohesion+`.
+By default, colcon keeps the standars output and standard error in a buffer fo a given package, and it displays it as a whole at the end of this package build. If you want output to be displayed as soon as possible, without this buffering, use `--event-handlers console_direct+`. You can have multiple `--event-handlers` options in the same colcon invocation.
+
+
 ## Migration strategy
 This is a suggestion of a way to migrate your packages.
 To migrate, for each packages until they are all migrated:
@@ -36,7 +52,7 @@ To migrate, for each packages until they are all migrated:
 3. Run the `ros2 pkg create --build-type ament_cmake <package_name>` command
     Note: In ROS2, you can create pure Python packages using `--build-type ament_python`, but the migration is more work. Only the CMake approach will be described.
 4. Use a diff tool to compare the `package.xml` of the old and new package. Migrate the dependencies. Use the [ROS Index](https://index.ros.org/) to check for package availability in ROS2. You might need to replace or remove some packages that have a ROS2 alternative, but no ROS2 version.
-5. Use a diff tool to compare the `CMakeLists.txt` of the old and new package. Most complex CMake logic can be directly copy-pasted. You will need to change the way that the dependencies are included, and also the way they are exported. Also, if you were building interfaces (messages, services or actions) as part of another package, you will need to move them to a dedicated interface package. Make sure that everything is installed, as there is no devel space anymore. Any file without an install rule will not be available by ROS.
+5. Use a diff tool to compare the `CMakeLists.txt` of the old and new package. Most complex CMake logic can be directly copy-pasted. You will need to change the way that the dependencies are included, and also the way they are exported. Also, if you were building interfaces (messages, services or actions) as part of another package, you will need to move them to a dedicated interface package. Make sure that everything is installed, as there is no devel space anymore. Any file without an install rule will not be available by ROS. Also, you will need to replace `CATKIN_*` CMake varibles with new forms. Most are simpler. For instance, `CATKIN_PACKAGE_SHARE_DIRECTORY` becomes `share/${PROJECT_NAME}`.
 You can check check the packages in our [`opentera-webrtc-ros`](https://github.com/introlab/opentera-webrtc-ros) or [`audio_utils`](https://github.com/introlab/audio_utils) repositories for examples or inspiration.
 6. Move all the remaining files in the new package. You might want to move your header files if you used C++ and did not already respect the layout created by `ros2 pkg create`, especially if you are making a library: this will require changes to the `CMakeLists.txt`.
 7. Delete the old package.
@@ -46,7 +62,12 @@ You can check check the packages in our [`opentera-webrtc-ros`](https://github.c
 
 Starting with the second package, you could have dependency errors, especially if you are exporting a library that depends on another library. Check [`audio_utils`](https://github.com/introlab/audio_utils) for an example of how to export such library if needed.
 
-## Migrating nodes
+## Migrating
+
+### Migrating interfaces
+- `Header` is now `std_msgs/Header`
+- Services no longer have a boolean return value to indicate failure. If you need one, add a `success` boolean in the response part of the interface.
+-
 
 ### Python nodes boilerplate
 Python nodes are relatively easy to migrate.
@@ -54,13 +75,24 @@ Python nodes are relatively easy to migrate.
 2. If you had a node class, inherit from `rclpy.node.Node`. If you did not, refactor so that you do, or just create a `rclpy.node.Node` and use it as you would have used a `NodeHandle` in ROS1 in C++ (pass it around).
 3. Replace `rospy.init_node(<name>)` with `rclpy.init()`. Move the name to the creation of the `rclpy.node.Node` (or in `super().__init__` if inheriting from it).
 4. Logging now requires the node instance. Use `{self/node}.get_logger().{info/warn/error}`, and pass it a single string. Use f-strings.
-5. Creating subscribers and publishers now require the node instance. Use `{self/node}.create_{publisher/subbscription}`. Invert the arguments of the type of the message and the name: the type is now first, the name is now second. If you had a `queue_size` argument, keep it, but remove the keyword if you were using it as a kwarg.
-6. Getting parameters now require the node instance, and a declaration. If you want to declare it and get it in one line, use the form `{self/node}.declare_parameter(<name>, <defaulf_value>).get_parameter_value().<type>_value`, where type if `string`, `bool`, `float`, etc. Use autocompletion.
+5. Creating subscribers and publishers now require the node instance. Use `{self/node}.create_{publisher/subscription}`. Invert the arguments of the type of the message and the name: the type is now first, the name is now second. If you had a `queue_size` argument, keep it, but remove the keyword if you were using it as a kwarg. Same goes for services.
+6. Timers are also created from the node (`node.create_timer`), and time needs to be obtained from it as well (`node.get_clock().now()`).
+7. Getting parameters now require the node instance, and a declaration. If you want to declare it and get it in one line, use the form `{self/node}.declare_parameter(<name>, <defaulf_value>).get_parameter_value().<type>_value`, where type if `string`, `bool`, `float`, etc. Use autocompletion.
+8. `spin` now takes the node as a parameter.
+9. Use `KeyboardInterrupt` directly, not a weird ROS version of it like in ROS1.
+10. Make sure to call `node.destroy_node()` and `rclpy.shutdown()` at the end, to prevent zombie nodes.
 
 ### C++ nodes boilerplate
 1. Replace `ros/ros.h` with `rclcpp/rclcpp.hpp` in includes.
 2. For every message, service and action, replace `<package>/MessageType.h` with `<package>/<interface_type>/message_type.hpp` in includes. For instance, `#include <std_msgs/String.h>` becomes `#include <std_msgs/msg/string.hpp>`.
 3. For every message, service and action, add the `::<interface_type>` subnamespace. For instance, `std_msgs::String` becomes `std_msgs::msg::String`.
+4. Every `ros::Publisher`, `ros::Subscriber` and stuff like that is now templated on the message type. You will to hunt down which thing is connected to which callback of which message type, and bring back this information where you declare the thing, probably in the header file. Also, `Subscriber` is now `Subscription`. Also, store shared ptr. For instance, if you had a `ros::Subscriber` that received `std_msgs/String` messages, you will now have a `rclcpp::Subscription<std_msgs::msg::String>::SharedPtr`.
+5. For every `advertiseService`, `advertise` and `subscribe`, you will need to use the node instance as `node->create_{service/publisher/subscription}`. Also, you can't use the `(<name>, &Class::callback, this)` form anymore: use a lambda to wrap the call in a self-contained callback. You can use [a helper like this](https://github.com/introlab/opentera-webrtc-ros/blob/ros2/opentera_webrtc_ros/include/opentera_webrtc_ros/utils.h#L11-L57) if you want to help you wrap everything. Same goes for services. If you are using `image_transport`, the API has not changed and you can still use the `(<name>, &Class::callback, this)` form with `image_transport`.
+6. Timers are also created from the node (`node->create_timer`), and time needs to be obtained from it as well (`node->now()/node->get_clock()->now()`). As a bonus, `Time` now lacks useful methods to convert to and from an integer number of milliseconds, so you will need to do this manually.
+7. Callbacks used to be able to receive their arguments as references or const& or const& to shared ptrs or basically anything. Now, it needs to be a shared ptr to non-const. When wrapping the callback inside of a lambda, you can change the constness: the lambda can receive a shared ptr to non-const, but the callback it will call with it can require a shared ptr to const, or even a const& shared ptr to const, and the implicit conversion will work, allowing you to have const-correctness in your callback if you wish. Also, don't spell out the shared ptr name, use `MessageType::SharedPtr` or `MessageType::ConstSharedPtr`. For services, there is `MessageType::{Request/Response}::[Const]SharedPtr`.
+8. Like in Python, parameters now require the node instance, and a declaration. Use `node->declare_parameter(<name>, <default_value>)`, this will directly return the value of the parameter (unlike in Python, where there is much more boilerplate). If you want a parameter with no default value, check [this example](https://github.com/introlab/opentera-webrtc-ros/blob/ros2/face_cropping/src/FaceCroppingNodeConfiguration.cpp#L7-L40).
+9. `spin` now takes the node as a parameter.
+
 
 ### More complex migrations in nodes
 1. If you were using `tf`, you will need to use `tf2` and ̀`tf2_ros`. You had a TransformListener. You will now also need a Buffer. Construct the buffer with the node's clock (`get_clock()`), and construct the listener with the buffer. The buffer will be used to get transforms instead of the listener.
@@ -69,16 +101,29 @@ You can also use the `tf_transformations` ROS package (note the underscore), whi
 3. `Rate`s are harder to use. If you can, use a `Timer` instead. If you need a rate, there is an example [here](https://github.com/introlab/opentera-webrtc-ros/blob/ros2/map_image_generator/src/main.cpp#L47).
 4. In ROS2, service calls are asynchronous. You can register a callback that will be called with the response when it is received. If you used to block on a service call in a callback (topic or other service), this can deadlock in ROS2. Either use asynchronous and callbacks, or dive deep into ROS2's [callback groups](https://docs.ros.org/en/humble/How-To-Guides/Using-callback-groups.html). There is an example using asynchronous [in C++ here](https://github.com/introlab/opentera-webrtc-ros/blob/ros2/map_image_generator/src/MapLabelsConverter.cpp#L26-L53), and one using callback groups [in Python here](https://github.com/introlab/t-top/blob/ros2-migration/ros/t_top/t_top/movement_commands.py#L77-L78) and [in C++ here](https://github.com/introlab/t-top/blob/ros2-migration/ros/demos/smart_speaker/src/states/task/WeatherForecastState.cpp#L21).
 5. In Python, typing is much more strict than it was. For instance, you can't directly publish a `str` now: you need to wrap it in a `String` message (using `String(data="...")` is an easy fix). Same thing for numbers: integers will not convert to floating point types in ROS messages. If you are trying to set the `x` field of a Pose as `pose.x = 0`, you will get a runtime error. Use `pose.x = 0.0` or use `pose.x = float(integer_value)`.
+6. If you were using a ROS parameter before creating the main node object (maybe it was to pre-configure how this main node would be created, or to instantiate a different node classe based on a parameter), you can't do that anymore, as getting parameters requires a node instance. You have a few choices:
+  1. Move the selection/choice inside the constructor of the one single node class. This breaks the single-responsibility principle and will make the code harder to reason about, probably.
+  2. Create a dummy temporary node, get the parameter, and destroy the dummy node. Then, use the parameter, and create the real node based on it. There is [a C++ example of this here](https://github.com/introlab/opentera-webrtc-ros/blob/ros2/face_cropping/src/face_cropping_node.cpp#L94-L103), and [a Python example here](https://github.com/introlab/audio_utils/blob/ros2/audio_utils/scripts/resampling_node.py#L304-L319).
+  3. Use composition and not inheritance. Create a node instance, get the parameters you need, then pass the node instance to the constructor of the main class, which will store it and use it as its node.
+7. `rclcpp::Node` inherits from `std::enable_shared_from_this`, which means that instances of `Node` are always meant to be stored inside a `shared_ptr`, and you can get a new `shared_ptr` to it even if you don't have a `shared_ptr`, but a direct reference to the node object. Most of the ROS2 API takes the node by `shared_ptr`, too. If you use composition, you will probably want to pass a reference to the `node` object to parts of your main node class: use a reference, you are guaranteed that it will live long enough because of composition, references can't be null, and they can call `node->shared_from_this()` if they ever need a shared ptr to pass to a ROS2 API function. But some things, like `image_transport`, need a `shared_ptr` to the node in their constructor. If you have composition of this inside your main node class which inherits from `Node`, you won't be able to initialize it in the constructor as `this->shared_from_this()` will not work in the constructor (you will get some sort of segmentation fault, probably). In this case, it might be easier to forgo inheritance altogether, and to use composition for the node: store a `shared_ptr<Node>` in your main node class, and use it instead of yourself when you need a node. It will act similar to a `NodeHandle` in ROS1. Place it befor the `image_transport` thing in your class, and it will be fully initialized when you need it to initialize `image_transport`.
+8. In C++, if you call a service asynchronously and the service server is not available, the service request will get stucked. You will never know that the service call failed, and you will leak memory. To prevent this, you need to cleanup the in-flight requests that have been there for too long. Check [this class that does this automatically](https://github.com/introlab/opentera-webrtc-ros/blob/ros2/opentera_webrtc_ros/include/opentera_webrtc_ros/utils.h#L83-L125). For some reason, this does not seem to be a concern in Python (We have not seen anywhere that this should also be done in Python).
+9. If the node is both Qt and ROS, you will need to have a ROS spinner in another thread. There is a simple class to do it [in C++ here](https://github.com/introlab/opentera-webrtc-ros/blob/ros2/opentera_webrtc_robot_gui/src/main.cpp#L37-L54). You could also use Executors as seen [here TODO]().
 
 ### Launch file migration
 This is relatively straightforward if you decide to stick to XML launch files, even though the documentation is not really good.
 This [ros2-launch migration guide](https://docs.ros.org/en/humble/How-To-Guides/Migrating-from-ROS1/Migrating-Launch-Files.html) is useful.
-You will need to use the `.launch.xml` suffix for your launch files.
-Also, `if` and `unless` are way more restricted and can only be placed on a handful of things now, check the migration guide.
-If you used to pass a launch parameter to change the `output=` of nodes, you can't anymore: it needs an hardcoded string that is either "log", "screen" or "both". A tip: use "log" (or nothing as "log" is the default), and pass the `-a` flag to the `ros2-launch` command when you need to debug: this will redirect everything to the console. You can also use the `OVERRIDE_LAUNCH_PROCESS_OUTPUT` environment variable (this is what `-a` does).
-In ROS1, `eval` tags were way easier to use than in ROS2. Now, you need a pair of quotes englobing the whole thing that you want to evaluate, which means that you'll need a bunch of escaping of strings. Also, you used to have access to substitutions using `arg('name')` inside the evaluated expression: you can't do that anymore, you need to use launch file substitutions, which are textual. This is painful, and it also means that using `eval` for doing an `OR` on two conditions, for instance, will have weird results, because it will operate on strings and not booleans. You can compare to the "true" or "false" strings explicitly, or you can use the new operators substitutions like shown [here](https://github.com/introlab/odas_ros/blob/ros2/odas_ros/launch/odas.launch.xml#L32) with `$(or ...)`.
-If you used `rosparam` tags to pass YAML structured parameters, this does not work anymore. Use `param`. You can use nested `param` tags to reproduce a nested/mapping structure.
-Also, if you need to pass an empty array to a parameter, you will suffer. Passing `"[]"` will be rejected as the type of the array cannot be deduced. For a string array, you can use `"['']"` and filter for empty strings in your code, if you don't need empty strings usually. For numeric arrays, use a special value that you will filter that is out of the range you use, or combine the array with a boolean that chooses wether the array should be ignored/considered empty or wether should be used.
+- You will need to use the `.launch.xml` suffix for your launch files.
+- `if` and `unless` are way more restricted and can only be placed on a handful of things now, check the migration guide.
+- If you used to pass a launch parameter to change the `output=` of nodes, you can't anymore: it needs an hardcoded string that is either "log", "screen" or "both". A tip: use "log" (or nothing as "log" is the default), and pass the `-a` flag to the `ros2-launch` command when you need to debug: this will redirect everything to the console. You can also use the `OVERRIDE_LAUNCH_PROCESS_OUTPUT` environment variable (this is what `-a` does).
+- In ROS1, `eval` tags were way easier to use than in ROS2. Now, you need a pair of quotes englobing the whole thing that you want to evaluate, which means that you'll need a bunch of escaping of strings. Also, you used to have access to substitutions using `arg('name')` inside the evaluated expression: you can't do that anymore, you need to use launch file substitutions, which are textual. This is painful, and it also means that using `eval` for doing an `OR` on two conditions, for instance, will have weird results, because it will operate on strings and not booleans. You can compare to the "true" or "false" strings explicitly, or you can use the new operators substitutions like shown [here](https://github.com/introlab/odas_ros/blob/ros2/odas_ros/launch/odas.launch.xml#L32) with `$(or ...)`.
+- If you used `rosparam` tags to pass YAML structured parameters, this does not work anymore. Use `param`. You can use nested `param` tags to reproduce a nested/mapping structure.
+- If you need to pass an empty array to a parameter, you will suffer. Passing `"[]"` will be rejected as the type of the array cannot be deduced. For a string array, you can use `"['']"` and filter for empty strings in your code, if you don't need empty strings usually. For numeric arrays, use a special value that you will filter that is out of the range you use, or combine the array with a boolean that chooses wether the array should be ignored/considered empty or wether should be used.
+- `include` works differently now: it does not create a different scope for arguments and stuff. Combine with `group` to isolate arguments.
+- `group` can't also add a namespace. Use `push-ros-namespace`.
+- Namespacing seems to work differently. You will most likely have a bunch of things that don't connect (topics publishers-subscribers, service clients-servers) correctly because of bad namespaces. Same goes for remapping, that will fail because the `from=` will now be wrong.s
+- `rtabmap` takes most of its parameters as string, even when they are booleans of numbers. The node will crash if passed a number of the form `"1"`, use the form `"'1'"`. If you need substitutions, place the additionnal quotes when the raw value is defined: they will be ignored around a substitution (see [this file](https://github.com/introlab/t-top/blob/ros2-migration/ros/t_top/launch/perceptions/rtabmap.launch.xml) for examples).
+- Float arguments that have integer values need a `.0` or they will be rejected as being the wrong type.
+- Replace `tf` with `tf2_ros`, and `rviz` with `rviz2`.
 
 The most painful thing here is that `ros2-launch` is really really bad to help you spot errors: you will get random Python tracebacks coming from the `ros2-launch` code, without much information on what the error was, and no information at all about where in the launch file it originated from. Even when using the `--debug` flag, you will only get more Python tracebacks.
 A few tips:
@@ -86,6 +131,26 @@ A few tips:
 - Make sure that your substitutions use `var` and not `arg` as in ROS1. Same thing for `find-package-prefix` or `find-package-share` instead of `find`.
 - Make sure that you use `exec=` and not `name=` in `node` tags.
 - Make sure that the launch files you `include` have the right suffix (probably `.launch.xml` for your's, probably `.launch.py` for externals, but not `.launch`: this is probably a ROS1 artifact).
+
+
+### Gazebo, simulation, URDF and navigation migration
+1. Need to pass `use_sim_time:=true` to every node in launch. Use special operations to set a parameter in every node (`set_parameter` tag at global scope in XML).
+2. Use [this page](https://github.com/ros-simulation/gazebo_ros_pkgs/wiki) to check how to migrate a given gazebo-ros plugin.
+3. For you models to appear in Gazebo, you might need a line [like this one in your `package.xml`](https://github.com/introlab/opentera-webrtc-ros/blob/ros2/turtlebot3_beam_description/package.xml#L26).
+4. The differential drive plugin has a `odometry_source` option. It used to be a string, now it's an integer (see [here](https://github.com/introlab/opentera-webrtc-ros/blob/ros2/turtlebot3_beam_description/urdf/turtlebot3_waffle.gazebo.xacro#L71)).
+5. Starting gazebo from a launch file is different. Same goes for the `robot_description`, which was a global parameter in ROS1, and is now a normal parameter to the `robot_state_publisher` node in ROS2 and received via the `/robot_description` topic by any other node (published by `robot_state_publisher`). Compare [before](https://github.com/introlab/opentera-webrtc-ros/blob/ros1/opentera_webrtc_demos/launch/opentera_turtlebot_sim.launch#L27-L42) and [after](https://github.com/introlab/opentera-webrtc-ros/blob/ros2/opentera_webrtc_demos/launch/opentera_turtlebot_sim.launch.xml#L26-L41).
+6. Every reference to `move_base` need to be replaced with the ROS2 `nav2` equivalent. Compare [before](https://github.com/introlab/opentera-webrtc-ros/blob/ros1/opentera_webrtc_demos/launch/opentera_turtlebot_sim.launch#L98-L101) and [after](https://github.com/introlab/opentera-webrtc-ros/blob/ros2/opentera_webrtc_demos/launch/opentera_turtlebot_sim.launch.xml#L99-L101) for a simple example in launch file.
+
+### RVIZ config files migration
+1. The `rviz` package is now `rviz2`. Replace `rviz` with `rviz2` in your launch files.
+2. All the components have moved. They no longer have the `rviz` prefix, but usually `rviz_common` or `rviz_default_plugins`. Use existing RVIZ config files for ROS2 to check the new names.
+3. A bunch of stuff changes in configuration of components
+  1. `robot_description` received via topic
+  2. Different component altogether to send goals to `nav2` than used with ROS1 `move_base`
+  3. A bunch of others.
+
+The easiest way is probably to re-create the config file from scratch by re-adding and re-configuring the components you need.
+Checking a diff between your old config file and a new one using similar components can also work, migrating the changes parts that seem important, but not touching window sizes and stuff like that.
 
 ## Other tips
 
@@ -95,5 +160,3 @@ Using a visual debugger with ROS is hard to configure. If you can use GDB, you c
 ros2 launch -a my_package my_launch_file.launch.xml --launch-prefix-filter '.*executable_name.*' --launch-prefix 'gnome-terminal --wait -- gdb -ex run --args'
 ```
 This will launch a new terminal window with GDB for every node that matches the filter regex. You will need to press "Enter" to start the node in every terminal, and you will need to kill the terminals manually at the end of your debug session.
-
-
