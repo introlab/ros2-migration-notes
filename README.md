@@ -12,7 +12,101 @@ Humble still supports Gazebo Classic, but Jazzy (Ubuntu 24.04) does not.
 Migration will be needed when moving to Jazzy.
 
 ## Building Humble on Ubuntu 20.04
-TODO
+Install a few dependencies:
+
+```bash
+sudo apt install -y ros-dev-tools python3-rosinstall-generator
+```
+
+Run these commands to prepare the workspace with everything you need:
+
+```bash
+mkdir -p ros2_humble_ws/src
+cd ros2_humble_ws
+
+rosinstall_generator --deps --rosdistro humble desktop_full \
+    launch_xml \
+    launch_yaml \
+    launch_testing \
+    launch_testing_ament_cmake \
+    demo_nodes_cpp \
+    demo_nodes_py \
+    example_interfaces \
+    camera_calibration_parsers \
+    camera_info_manager \
+    cv_bridge \
+    v4l2_camera \
+    vision_opencv \
+    vision_msgs \
+    image_geometry \
+    image_pipeline \
+    image_transport \
+    compressed_image_transport \
+    compressed_depth_image_transport \
+    rosbag2_storage_mcap \
+    rtabmap \
+    rtabmap_ros \
+    diagnostics \
+    turtlebot3_gazebo \
+    turtlebot3_description \
+    turtlebot3_navigation2 \
+    gazebo_ros_pkgs \
+    joint_state_publisher_gui \
+    rqt_tf_tree \
+> ros2.humble.opentera_webrtc_ros.rosinstall
+
+sed -i '$d' ros2.humble.opentera_webrtc_ros.rosinstall
+
+cat <<EOF >> ros2.humble.opentera_webrtc_ros.rosinstall
+- git:
+    local-name: cv_camera
+    uri: https://github.com/Kapernikov/cv_camera.git
+    version: master
+- git:
+    local-name: xtl
+    uri: https://github.com/xtensor-stack/xtl.git
+    version: 0.7.2
+- git:
+    local-name: xtensor
+    uri: https://github.com/xtensor-stack/xtensor.git
+    version: 0.23.10
+- git:
+    local-name: xsimd
+    uri: https://github.com/xtensor-stack/xsimd.git
+    version: 7.6.0
+EOF
+```
+This combines a `rosinstall_generator` call to get all repos from the `desktop_full` pack,and additionnal dependencies. It also adds the `cv_camera` package, which was ported to ROS2 in a fork that is not available via `rosinstall_generator`, and the `xtl`, `xtensor` and `xsimd` C++ libraries using the versions they have on Ubuntu 22.04. for maximum compatibility.
+
+Then run these commands to clone all the repos and install their dependencies:
+```bash
+vcs import src < ros2.humble.opentera_webrtc_ros.rosinstall
+rosdep install --from-paths src --ignore-src -y --skip-keys "fastcdr rti-connext-dds-6.0.1 urdfdom_headers xsimd xtensor test_pluginlib" --rosdistro humble
+```
+
+You will need to apply a few patches as shown [here](https://github.com/introlab/t-top/blob/ros2-migration/tools/setup_scripts/ros2_humble_install.sh#L241-L242). The patch files are [here (raw libg2o)](https://raw.githubusercontent.com/introlab/t-top/ros2-migration/tools/setup_scripts/patch/libg2o.patch) and [here (raw octomap_msgs)](https://raw.githubusercontent.com/introlab/t-top/ros2-migration/tools/setup_scripts/patch/octomap_msgs.patch).
+
+Create a file named `colcon_defaults.yaml` in the root of the workspace with the following content:
+```yaml
+build:
+  cmake-clean-cache: true
+  cmake-args:
+    - -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+    - --no-warn-unused-cli
+    - -DCMAKE_BUILD_TYPE=Release
+    - -DPYTHON_EXECUTABLE=/usr/bin/python3
+    - -DCMAKE_POLICY_DEFAULT_CMP0135=NEW # DOWNLOAD_EXTRACT_TIMESTAMP
+    - -DBUILD_TESTING=OFF
+```
+
+You can now build the workspace:
+```bash
+colcon build
+```
+
+This will take a while.
+
+You will be able to use this ROS2 installation by sourcing the `ros2_humble_ws/install/setup.bash` file.
 
 ## Workspace
 
@@ -107,7 +201,7 @@ You can also use the `tf_transformations` ROS package (note the underscore), whi
   3. Use composition and not inheritance. Create a node instance, get the parameters you need, then pass the node instance to the constructor of the main class, which will store it and use it as its node.
 7. `rclcpp::Node` inherits from `std::enable_shared_from_this`, which means that instances of `Node` are always meant to be stored inside a `shared_ptr`, and you can get a new `shared_ptr` to it even if you don't have a `shared_ptr`, but a direct reference to the node object. Most of the ROS2 API takes the node by `shared_ptr`, too. If you use composition, you will probably want to pass a reference to the `node` object to parts of your main node class: use a reference, you are guaranteed that it will live long enough because of composition, references can't be null, and they can call `node->shared_from_this()` if they ever need a shared ptr to pass to a ROS2 API function. But some things, like `image_transport`, need a `shared_ptr` to the node in their constructor. If you have composition of this inside your main node class which inherits from `Node`, you won't be able to initialize it in the constructor as `this->shared_from_this()` will not work in the constructor (you will get some sort of segmentation fault, probably). In this case, it might be easier to forgo inheritance altogether, and to use composition for the node: store a `shared_ptr<Node>` in your main node class, and use it instead of yourself when you need a node. It will act similar to a `NodeHandle` in ROS1. Place it befor the `image_transport` thing in your class, and it will be fully initialized when you need it to initialize `image_transport`.
 8. In C++, if you call a service asynchronously and the service server is not available, the service request will get stucked. You will never know that the service call failed, and you will leak memory. To prevent this, you need to cleanup the in-flight requests that have been there for too long. Check [this class that does this automatically](https://github.com/introlab/opentera-webrtc-ros/blob/ros2/opentera_webrtc_ros/include/opentera_webrtc_ros/utils.h#L83-L125). For some reason, this does not seem to be a concern in Python (We have not seen anywhere that this should also be done in Python).
-9. If the node is both Qt and ROS, you will need to have a ROS spinner in another thread. There is a simple class to do it [in C++ here](https://github.com/introlab/opentera-webrtc-ros/blob/ros2/opentera_webrtc_robot_gui/src/main.cpp#L37-L54). You could also use Executors as seen [here TODO]().
+9. If the node is both Qt and ROS, you will need to have a ROS spinner in another thread. There is a simple class to do it [in C++ here](https://github.com/introlab/opentera-webrtc-ros/blob/ros2/opentera_webrtc_robot_gui/src/main.cpp#L37-L54). You could also use Executors as seen [here](https://github.com/introlab/t-top/blob/ros2-migration/ros/demos/control_panel/src/control_panel_node.cpp#L63-L73).
 
 ### Launch file migration
 This is relatively straightforward if you decide to stick to XML launch files, even though the documentation is not really good.
