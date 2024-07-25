@@ -86,6 +86,9 @@ rosdep install --from-paths src --ignore-src -y --skip-keys "fastcdr rti-connext
 The `--skip-keys` option is there to skip some dependencies that are not available in the Ubuntu 20.04 repositories. Some are installed separatly (`xsimd` and `xtensor`, as shown above), and the others come from the [documentation for building Humble from source](https://docs.ros.org/en/humble/Installation/Alternatives/Ubuntu-Development-Setup.html#install-dependencies-using-rosdep).
 
 You will need to apply a few patches as shown [here](https://github.com/introlab/t-top/blob/ros2-migration/tools/setup_scripts/ros2_humble_install.sh#L241-L242). The patch files are [here (raw libg2o)](https://raw.githubusercontent.com/introlab/t-top/ros2-migration/tools/setup_scripts/patch/libg2o.patch) and [here (raw octomap_msgs)](https://raw.githubusercontent.com/introlab/t-top/ros2-migration/tools/setup_scripts/patch/octomap_msgs.patch).
+The libg2o patch essentially renames the library, as well as adding some ament stuff required to correctly generate the setup files for the package. Without the patch, every time the workspace will be sourced, there will be a warning about a missing file.
+The octomap_msgs patch fixes a wrong installation path for a header file which, prevents compilation of dependent packages such as rtabmap.
+
 
 Create a file named `colcon_defaults.yaml` in the root of the workspace with the following content:
 ```yaml
@@ -100,14 +103,46 @@ build:
     - -DBUILD_TESTING=OFF
 ```
 
+If you want to enable CUDA for librealsense, add `-DBUILD_WITH_CUDA=ON` to the `cmake-args` list.
+If you want to enable math optimizations for you platform, you can also add `-DCMAKE_CXX_FLAGS='-march=native -ffast-math'` and `-DCMAKE_C_FLAGS='-march=native -ffast-math'`.
+See [this T-Top installation script](https://github.com/introlab/t-top/blob/ros2-migration/tools/setup_scripts/jetson_configuration.sh#L433) for an example.
+With all of these options, the file content would look like this:
+```yaml
+build:
+  cmake-clean-cache: true
+  cmake-args:
+    - -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+    - --no-warn-unused-cli
+    - -DCMAKE_BUILD_TYPE=Release
+    - -DPYTHON_EXECUTABLE=/usr/bin/python3
+    - -DCMAKE_POLICY_DEFAULT_CMP0135=NEW # DOWNLOAD_EXTRACT_TIMESTAMP
+    - -DBUILD_TESTING=OFF
+    - -DBUILD_WITH_CUDA=ON
+    - -DCMAKE_CXX_FLAGS='-march=native -ffast-math'
+    - -DCMAKE_C_FLAGS='-march=native -ffast-math'
+```
+
 You can now build the workspace:
 ```bash
 colcon build
 ```
 
 This will take a while.
+On the Jetson AGX Orin, it will probably take more than four hours.
+On a personnal computer, it will also probably be between two and three hours.
+On a laptop with an Intel i7-9750H and 32 GB of RAM, it took about two and a half hours.
 
 You will be able to use this ROS2 installation by sourcing the `ros2_humble_ws/install/setup.bash` file.
+Il you won't use any other ROS1 or ROS2 distribution, you can chose to add this line to your `~/.bashrc` (if using bash) or `~/.zshrc` (if using zsh):
+```bash
+source ~/ros2_humble_ws/install/setup.bash
+```
+It you might want to use multiple ROS distributions but want to reduce typying, you could create an alias by adding this to your `~/.bashrc` (if using bash) or `~/.zshrc` (if using zsh):
+```bash
+alias source_humble='. ~/ros2_humble_ws/install/setup.bash'
+```
+You can name the alias however you want.
+You will then be able to just type `source_humble` in a terminal to source the file.
 
 ## Workspace migration
 
