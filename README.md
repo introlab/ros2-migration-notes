@@ -1,5 +1,4 @@
-# ros2-migration-notes
-ROS2 migration notes
+# ROS2 migration notes
 
 This assumes that you are migrating from ROS1 Noetic on Ubuntu 20.04 to ROS2 Humble (either on Ubuntu 22.04 or compiled from source on Ubuntu 20.04).
 Using Foxy is not recommended: it is distributed in binary form on Ubuntu 20.04, but it is already past its end-of-support date.
