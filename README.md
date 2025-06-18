@@ -87,7 +87,9 @@ The `--skip-keys` option is there to skip some dependencies that are not availab
 
 You will need to apply a few patches as shown [here](https://github.com/introlab/t-top/blob/ros2-migration/tools/setup_scripts/ros2_humble_install.sh#L241-L242). The patch files are [here (raw libg2o)](https://raw.githubusercontent.com/introlab/t-top/ros2-migration/tools/setup_scripts/patch/libg2o.patch) and [here (raw octomap_msgs)](https://raw.githubusercontent.com/introlab/t-top/ros2-migration/tools/setup_scripts/patch/octomap_msgs.patch).
 The libg2o patch essentially renames the library, as well as adding some ament stuff required to correctly generate the setup files for the package. Without the patch, every time the workspace will be sourced, there will be a warning about a missing file.
-The octomap_msgs patch fixes a wrong installation path for a header file which, prevents compilation of dependent packages such as rtabmap.
+The octomap_msgs patch fixes a wrong installation path for a header file, which prevents compilation of dependent packages such as rtabmap.
+(These problems might be fixed in the future.
+You can try without the patches first to see if they are still needed.)
 
 
 Create a file named `colcon_defaults.yaml` in the root of the workspace with the following content:
@@ -225,7 +227,7 @@ Python nodes are relatively easy to migrate.
 
 
 ### More complex migrations in nodes
-1. If you were using `tf`, you will need to use `tf2` and ̀`tf2_ros`. You had a TransformListener. You will now also need a Buffer. Construct the buffer with the node's clock (`get_clock()`), and construct the listener with the buffer. The buffer will be used to get transforms instead of the listener.
+1. If you were using `tf`, you will need to use `tf2` and `tf2_ros`. You had a TransformListener. You will now also need a Buffer. Construct the buffer with the node's clock (`get_clock()`), and construct the listener with the buffer. The buffer will be used to get transforms instead of the listener.
 2. If you were using `tf.transformations` in Python, there is no equivalent in ROS2 as this module is deprecated. Instead, use the `transforms3d` Python package. The API is different, so be careful. For instance, in quaternions, `tf.transormations` placed `w` last, while `transforms3d` places it first. Here is [an example](https://github.com/introlab/opentera-webrtc-ros/blob/ros2/opentera_webrtc_ros/opentera_webrtc_ros/libmapimageconverter.py#L14-L24) of using it to get the same API as in ROS1.
 You can also use the `tf_transformations` ROS package (note the underscore), which wraps `transforms3d` with the same API as `tf.transformations` had in ROS1. There is an example [here](https://github.com/introlab/t-top/blob/ros2-migration/ros/t_top/t_top/movement_commands.py#L12).
 3. `Rate`s are harder to use. If you can, use a `Timer` instead. If you need a rate, there is an example [here](https://github.com/introlab/opentera-webrtc-ros/blob/ros2/map_image_generator/src/main.cpp#L47).
