@@ -5,7 +5,8 @@ This assumes that you are migrating from ROS1 Noetic on Ubuntu 20.04 to ROS2 Hum
 Using Foxy is not recommended: it is distributed in binary form on Ubuntu 20.04, but it is already past its end-of-support date.
 Also, Foxy and Humble have a few incompatibilities (for instance, names of created interfaces [msgs, srvs, actions] CMake targets and packages).
 Foxy was not as mature as Humble is, and some features were missing (for instance, declaring parameters without default values, but with a type).
-Use Humble.
+We recommend to use Humble.
+If you can, use Ubuntu 22.04 and install Humble from the binary packages, this will be easier than building Humble from source.
 
 Also, this does not cover migration from using Gazebo Classic to the newer Ignition Gazebo.
 Humble still supports Gazebo Classic, but Jazzy (Ubuntu 24.04) does not.
