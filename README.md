@@ -7,6 +7,7 @@ Also, Foxy and Humble have a few incompatibilities (for instance, names of creat
 Foxy was not as mature as Humble is, and some features were missing (for instance, declaring parameters without default values, but with a type).
 We recommend to use Humble.
 If you can, use Ubuntu 22.04 and install Humble from the binary packages, this will be easier than building Humble from source.
+You can also jump directly to Ubuntu 24.04 and Jazzy.
 
 Also, this does not cover migration from using Gazebo Classic to the newer Ignition Gazebo.
 Humble still supports Gazebo Classic, but Jazzy (Ubuntu 24.04) does not.
